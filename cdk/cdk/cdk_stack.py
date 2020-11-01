@@ -1,5 +1,7 @@
 from aws_cdk import (
     core,
+    aws_lambda as lambda_,
+    aws_lambda_event_sources as les,
     aws_s3 as s3,
     aws_s3_notifications as s3n,
     aws_sqs as sqs,
@@ -43,4 +45,22 @@ class MediaTranscriptionStack(core.Stack):
             s3.EventType.OBJECT_CREATED,
             s3n.SqsDestination(media_bucket_event_queue),
             *[s3.NotificationKeyFilter(prefix='media-input/')],
+        )
+
+        # Lambda function to create Transcribe jobs
+        transcribe_job_init_fn = lambda_.Function(
+            self,
+            'transcribe-job-init-fn',
+            runtime=lambda_.Runtime.PYTHON_3_8,
+            handler='fn.handler',
+            code=lambda_.Code.from_asset('../lambdas/transcribe-job-init-fn'),
+            reserved_concurrent_executions=1,  # Effectively single-threaded
+        )
+        # Triggered by SQS messages created for media file puts
+        transcribe_job_init_fn.add_event_source(
+            les.SqsEventSource(
+                queue=media_bucket_event_queue,
+                batch_size=5,
+                enabled=True,
+            )
         )
