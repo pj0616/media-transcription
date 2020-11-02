@@ -54,8 +54,26 @@ class MediaTranscriptionStack(core.Stack):
             self,
             'transcribe-job-init-fn',
             runtime=lambda_.Runtime.PYTHON_3_8,
+            code=lambda_.Code.from_asset(
+                '../lambdas/transcribe-job-init-fn',
+                # The following is just dumb.
+                # The Lambda runtime doesn't use the latest boto3 by default.
+                # In order to use the latest boto3, we have to pip install
+                # and bundle locally using Docker.
+                # Q: Why need the latest boto3?
+                # A: https://github.com/boto/boto3/issues/2630
+                # I'll have to delete the ECR containers to avoid cost.
+                # TODO: Revert back to normal in like a month I guess.
+                bundling={
+                    'image': lambda_.Runtime.PYTHON_3_8.bundling_docker_image,
+                    'command': [
+                        'bash',
+                        '-c',
+                        '\n        pip install -r requirements.txt -t /asset-output &&\n        cp -au . /asset-output\n        '
+                    ]
+                }
+            ),
             handler='fn.handler',
-            code=lambda_.Code.from_asset('../lambdas/transcribe-job-init-fn'),
             reserved_concurrent_executions=1,  # Effectively single-threaded
         )
         # Triggered by SQS messages created for media file puts
@@ -66,6 +84,7 @@ class MediaTranscriptionStack(core.Stack):
                 enabled=True,
             )
         )
+        # Grant access to start transcription jobs
         transcribe_job_init_fn.add_to_role_policy(
             statement=iam.PolicyStatement(
                 actions=[
@@ -74,6 +93,32 @@ class MediaTranscriptionStack(core.Stack):
                 resources=['*'],
                 effect=iam.Effect.ALLOW,
             )
+        )
+
+        # Grant Lambda role to read and write to input and output portions of
+        # the S3 bucket.
+        # Q: Why grant Lambda the permissions instead of Transcribe service?
+        # A: Two-fold:
+        #   -  i) https://amzn.to/321Nx5I
+        #   - ii) Granting just to this Lambda means other Transcribe jobs
+        #         across the account cannot use this bucket (least privilege).
+        media_bucket.grant_read(
+            identity=transcribe_job_init_fn.grant_principal,
+            objects_key_pattern='media-input/*'
+        )
+        # Cannot specify a prefix for writes as Transcribe will not accept
+        # a job unless it has write permission on the whole bucket.
+        # Edit: The above statement was when I had to use '*' for writes. But
+        #       now, I granted access to that .write_access_check_file.temp
+        #       file and it seems to all work now?
+        media_bucket.grant_write(
+            identity=transcribe_job_init_fn.grant_principal,
+            objects_key_pattern='transcribe-output-raw/*'
+        )
+        # This is just as frustrating to you as it is to me.
+        media_bucket.grant_write(
+            identity=transcribe_job_init_fn.grant_principal,
+            objects_key_pattern='.write_access_check_file.temp'
         )
 
         # DynamoDB table for Jobs metadata
