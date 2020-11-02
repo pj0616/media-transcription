@@ -5,9 +5,12 @@ __pycache__
 .env
 *.egg-info
 
+.vscode
+
 # CDK asset staging directory
 cdk/.cdk.staging
 cdk/cdk.out
 cdk/venv
 
-.vscode
+# Lambdas
+lambdas/transcribe-job-init-fn/venv
