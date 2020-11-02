@@ -1,5 +1,7 @@
 from aws_cdk import (
     core,
+    aws_dynamodb as ddb,
+    aws_iam as iam,
     aws_lambda as lambda_,
     aws_lambda_event_sources as les,
     aws_s3 as s3,
@@ -47,7 +49,7 @@ class MediaTranscriptionStack(core.Stack):
             *[s3.NotificationKeyFilter(prefix='media-input/')],
         )
 
-        # Lambda function to create Transcribe jobs
+        # Lambda function to create/submit Transcribe jobs
         transcribe_job_init_fn = lambda_.Function(
             self,
             'transcribe-job-init-fn',
@@ -63,4 +65,32 @@ class MediaTranscriptionStack(core.Stack):
                 batch_size=5,
                 enabled=True,
             )
+        )
+        transcribe_job_init_fn.add_to_role_policy(
+            statement=iam.PolicyStatement(
+                actions=[
+                    'transcribe:StartTranscriptionJob',
+                ],
+                resources=['*'],
+                effect=iam.Effect.ALLOW,
+            )
+        )
+
+        # DynamoDB table for Jobs metadata
+        jobs_metadata_table = ddb.Table(
+            self,
+            'MediaTranscription-TranscriptionJobs',
+            table_name='MediaTranscription-TranscriptionJobs',
+            partition_key=ddb.Attribute(
+                name='Bucket-Key-ETag',
+                type=ddb.AttributeType.STRING,
+            ),
+            billing_mode=ddb.BillingMode.PAY_PER_REQUEST,
+        )
+        jobs_metadata_table.grant(
+            transcribe_job_init_fn.grant_principal,
+            *[
+                'dynamodb:GetItem',
+                'dynamodb:PutItem',
+            ]
         )
