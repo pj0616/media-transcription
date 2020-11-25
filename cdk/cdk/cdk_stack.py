@@ -139,3 +139,51 @@ class MediaTranscriptionStack(core.Stack):
                 'dynamodb:PutItem',
             ]
         )
+
+        # Create IAM Group with read/write permissions to S3 bucket
+        # TODO: Make this more federated and robust
+        console_users_group = iam.Group(self, 'MediaTranscriptionConsoleUsers')
+        console_users_group.attach_inline_policy(policy=iam.Policy(
+            self,
+            'MediaTranscriptionConsoleUserS3Access',
+            statements=[
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    actions=[
+                        's3:ListBucket',
+                    ],
+                    resources=[
+                        media_bucket.bucket_arn,
+                    ],
+                ),
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    actions=[
+                        's3:GetObject',
+                        's3:PutObject',
+                    ],
+                    resources=[
+                        media_bucket.arn_for_objects('media-input/*'),
+                    ],
+                ),
+                iam.PolicyStatement(
+                    effect=iam.Effect.ALLOW,
+                    actions=[
+                        's3:GetObject',
+                    ],
+                    resources=[
+                        media_bucket.arn_for_objects('transcribe-output-raw/*'),
+                    ],
+                ),
+            ],
+        ))
+
+        # TODO: CloudWatch event for Transcribe job state change (for later)
+        # TODO: S3 trigger on transcription-output-raw/ folder to SQS to Lambda
+        # TODO: Implement Lambda to format the raw transcription output
+        # TODO: SNS Notification when formatted transcription ready
+        # TODO: Step Functions for job coordination:
+        #       - Create job
+        #       - Wait for job
+        #       - Format output
+        #       - Sent notification
